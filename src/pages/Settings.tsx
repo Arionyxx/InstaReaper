@@ -56,8 +56,7 @@ export function SettingsPage() {
         ...newSettings,
         torboxApiKey: (newSettings.torboxApiKey ?? settings.torboxApiKey) || '',
         torboxApiBaseUrl:
-          (newSettings.torboxApiBaseUrl ?? settings.torboxApiBaseUrl || DEFAULT_TORBOX_BASE_URL) ||
-          DEFAULT_TORBOX_BASE_URL,
+          ((newSettings.torboxApiBaseUrl ?? settings.torboxApiBaseUrl) || DEFAULT_TORBOX_BASE_URL),
         downloadDir: newSettings.downloadDir ?? settings.downloadDir ?? '',
         driveFolderId: newSettings.driveFolderId ?? settings.driveFolderId ?? '',
       }

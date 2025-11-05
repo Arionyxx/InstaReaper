@@ -173,6 +173,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('instagram:destroy'),
     extract: (): Promise<boolean> => 
       ipcRenderer.invoke('instagram:extract'),
+    openInBrowser: (): Promise<boolean> => 
+      ipcRenderer.invoke('instagram:openInBrowser'),
   },
 
   // Events
@@ -185,6 +187,22 @@ contextBridge.exposeInMainWorld('electronAPI', {
         console.error('Invalid reels data:', error)
       }
     })
+  },
+
+  onInstagramLoaded: (callback: () => void) => {
+    ipcRenderer.on('instagram:loaded', callback)
+  },
+
+  onInstagramLoadTimeout: (callback: () => void) => {
+    ipcRenderer.on('instagram:load-timeout', callback)
+  },
+
+  onInstagramLoadError: (callback: (error: { errorCode: number; errorDescription: string }) => void) => {
+    ipcRenderer.on('instagram:load-error', (_, error) => callback(error))
+  },
+
+  onInstagramExtractionError: (callback: (error: string) => void) => {
+    ipcRenderer.on('instagram:extraction-error', (_, error) => callback(error))
   },
 
   removeAllListeners: (channel: string) => {
@@ -225,7 +243,12 @@ export type ElectronAPI = {
     create: () => Promise<boolean>
     destroy: () => Promise<boolean>
     extract: () => Promise<boolean>
+    openInBrowser: () => Promise<boolean>
   }
   onReelsFound: (callback: (reels: any[]) => void) => void
+  onInstagramLoaded: (callback: () => void) => void
+  onInstagramLoadTimeout: (callback: () => void) => void
+  onInstagramLoadError: (callback: (error: { errorCode: number; errorDescription: string }) => void) => void
+  onInstagramExtractionError: (callback: (error: string) => void) => void
   removeAllListeners: (channel: string) => void
 }

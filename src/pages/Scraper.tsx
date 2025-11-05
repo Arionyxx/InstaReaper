@@ -13,7 +13,10 @@ import {
   Play,
   ExternalLink,
   Grid3X3,
-  List
+  List,
+  Globe,
+  AlertTriangle,
+  RefreshCw
 } from 'lucide-react'
 
 export function Scraper() {
@@ -25,6 +28,9 @@ export function Scraper() {
   const [extracting, setExtracting] = useState(false)
   const [browserOpen, setBrowserOpen] = useState(false)
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid')
+  const [instagramLoading, setInstagramLoading] = useState(false)
+  const [instagramError, setInstagramError] = useState<string | null>(null)
+  const [showTimeoutFallback, setShowTimeoutFallback] = useState(false)
   const { addToast } = useToast()
   const { isDownloadDirConfigured } = useSettings()
 
@@ -32,20 +38,65 @@ export function Scraper() {
     // Listen for reels found from Instagram
     window.electronAPI.onReelsFound((foundReels) => {
       setReels(foundReels)
+      setExtracting(false)
       addToast({
         type: 'success',
         message: `Found ${foundReels.length} reels`,
       })
     })
 
+    // Listen for Instagram loaded successfully
+    window.electronAPI.onInstagramLoaded(() => {
+      setInstagramLoading(false)
+      setInstagramError(null)
+      setShowTimeoutFallback(false)
+      addToast({
+        type: 'success',
+        message: 'Instagram loaded successfully',
+      })
+    })
+
+    // Listen for Instagram load timeout
+    window.electronAPI.onInstagramLoadTimeout(() => {
+      setInstagramLoading(false)
+      setShowTimeoutFallback(true)
+      addToast({
+        type: 'warning',
+        message: 'Instagram is taking too long to load. You can try opening in your system browser.',
+      })
+    })
+
+    // Listen for Instagram load errors
+    window.electronAPI.onInstagramLoadError((error) => {
+      setInstagramLoading(false)
+      setInstagramError(`Failed to load Instagram: ${error.errorDescription}`)
+      addToast({
+        type: 'error',
+        message: `Failed to load Instagram: ${error.errorDescription}`,
+      })
+    })
+
+    // Listen for extraction errors
+    window.electronAPI.onInstagramExtractionError((error) => {
+      setExtracting(false)
+      addToast({
+        type: 'error',
+        message: `Extraction failed: ${error}`,
+      })
+    })
+
     return () => {
       window.electronAPI.removeAllListeners('reels:found')
+      window.electronAPI.removeAllListeners('instagram:loaded')
+      window.electronAPI.removeAllListeners('instagram:load-timeout')
+      window.electronAPI.removeAllListeners('instagram:load-error')
+      window.electronAPI.removeAllListeners('instagram:extraction-error')
     }
-  }, [])
+  }, [addToast])
 
   useEffect(() => {
     filterReels()
-  }, [reels, keywords])
+  }, [reels, keywords]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const filterReels = () => {
     if (!keywords.trim()) {
@@ -69,20 +120,21 @@ export function Scraper() {
 
   const openInstagramBrowser = async () => {
     try {
-      setExtracting(true)
+      setInstagramLoading(true)
+      setInstagramError(null)
+      setShowTimeoutFallback(false)
       await window.electronAPI.instagram.create()
       setBrowserOpen(true)
       addToast({
         type: 'info',
-        message: 'Instagram browser opened. Navigate to reels and click "Extract from current page"',
+        message: 'Opening Instagram browser... This may take a moment.',
       })
     } catch (error) {
+      setInstagramLoading(false)
       addToast({
         type: 'error',
         message: 'Failed to open Instagram browser',
       })
-    } finally {
-      setExtracting(false)
     }
   }
 
@@ -90,6 +142,9 @@ export function Scraper() {
     try {
       await window.electronAPI.instagram.destroy()
       setBrowserOpen(false)
+      setInstagramLoading(false)
+      setInstagramError(null)
+      setShowTimeoutFallback(false)
       setReels([])
       setSelectedReels(new Set())
     } catch (error) {
@@ -109,8 +164,21 @@ export function Scraper() {
         type: 'error',
         message: 'Failed to extract reels from current page',
       })
-    } finally {
-      setExtracting(false)
+    }
+  }
+
+  const openInstagramInSystemBrowser = async () => {
+    try {
+      await window.electronAPI.instagram.openInBrowser()
+      addToast({
+        type: 'info',
+        message: 'Opening Instagram in your system browser...',
+      })
+    } catch (error) {
+      addToast({
+        type: 'error',
+        message: 'Failed to open Instagram in system browser',
+      })
     }
   }
 
@@ -198,46 +266,130 @@ export function Scraper() {
       <div className="glass-dark rounded-xl p-6">
         <div className="flex flex-col gap-4">
           {/* Instagram Browser Controls */}
-          <div className="flex items-center justify-between">
-            <div>
-              <h3 className="font-semibold mb-2">Instagram Browser</h3>
-              <p className="text-sm text-neutral-400">
-                Open Instagram to extract reels from your feed or profile
-              </p>
-            </div>
-            <div className="flex gap-3">
-              {!browserOpen ? (
-                <button
-                  onClick={openInstagramBrowser}
-                  disabled={extracting}
-                  className="btn-primary flex items-center gap-2 disabled:opacity-50"
-                >
-                  <Play className="w-4 h-4" />
-                  Open Instagram
-                </button>
-              ) : (
-                <>
+          <div className="flex flex-col gap-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="font-semibold mb-2">Instagram Browser</h3>
+                <p className="text-sm text-neutral-400">
+                  Open Instagram to extract reels from your feed or profile
+                </p>
+              </div>
+              <div className="flex gap-3">
+                {!browserOpen ? (
                   <button
-                    onClick={extractFromCurrentPage}
-                    disabled={extracting}
-                    className="btn-secondary flex items-center gap-2 disabled:opacity-50"
+                    onClick={openInstagramBrowser}
+                    disabled={instagramLoading}
+                    className="btn-primary flex items-center gap-2 disabled:opacity-50"
                   >
-                    {extracting ? (
+                    {instagramLoading ? (
                       <Loader2 className="w-4 h-4 animate-spin" />
                     ) : (
-                      <Search className="w-4 h-4" />
+                      <Play className="w-4 h-4" />
                     )}
-                    Extract from current page
+                    {instagramLoading ? 'Loading...' : 'Open Instagram'}
                   </button>
-                  <button
-                    onClick={closeInstagramBrowser}
-                    className="btn-secondary"
-                  >
-                    Close
-                  </button>
-                </>
-              )}
+                ) : (
+                  <>
+                    <button
+                      onClick={extractFromCurrentPage}
+                      disabled={extracting}
+                      className="btn-secondary flex items-center gap-2 disabled:opacity-50"
+                    >
+                      {extracting ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <Search className="w-4 h-4" />
+                      )}
+                      Extract from current page
+                    </button>
+                    <button
+                      onClick={closeInstagramBrowser}
+                      className="btn-secondary"
+                    >
+                      Close
+                    </button>
+                  </>
+                )}
+              </div>
             </div>
+
+            {/* Loading State */}
+            {instagramLoading && (
+              <div className="flex items-center gap-3 p-3 bg-blue-500/10 border border-blue-500/20 rounded-lg">
+                <Loader2 className="w-4 h-4 animate-spin text-blue-400" />
+                <span className="text-sm text-blue-300">Loading Instagram...</span>
+              </div>
+            )}
+
+            {/* Error State */}
+            {instagramError && (
+              <div className="flex items-start gap-3 p-3 bg-red-500/10 border border-red-500/20 rounded-lg">
+                <AlertTriangle className="w-4 h-4 text-red-400 mt-0.5" />
+                <div className="flex-1">
+                  <p className="text-sm text-red-300">{instagramError}</p>
+                  <div className="flex gap-2 mt-2">
+                    <button
+                      onClick={openInstagramBrowser}
+                      className="text-xs btn-secondary py-1 px-2"
+                    >
+                      <RefreshCw className="w-3 h-3 inline mr-1" />
+                      Retry
+                    </button>
+                    <button
+                      onClick={openInstagramInSystemBrowser}
+                      className="text-xs btn-secondary py-1 px-2"
+                    >
+                      <Globe className="w-3 h-3 inline mr-1" />
+                      Open in Browser
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Timeout Fallback */}
+            {showTimeoutFallback && (
+              <div className="flex items-start gap-3 p-3 bg-yellow-500/10 border border-yellow-500/20 rounded-lg">
+                <AlertTriangle className="w-4 h-4 text-yellow-400 mt-0.5" />
+                <div className="flex-1">
+                  <p className="text-sm text-yellow-300">
+                    Instagram is taking longer than expected to load. This can happen due to network issues or Instagram's anti-bot measures.
+                  </p>
+                  <div className="flex gap-2 mt-2">
+                    <button
+                      onClick={openInstagramInSystemBrowser}
+                      className="text-xs btn-primary py-1 px-2"
+                    >
+                      <Globe className="w-3 h-3 inline mr-1" />
+                      Open in System Browser
+                    </button>
+                    <button
+                      onClick={openInstagramBrowser}
+                      className="text-xs btn-secondary py-1 px-2"
+                    >
+                      <RefreshCw className="w-3 h-3 inline mr-1" />
+                      Try Again
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* System Browser Action */}
+            {!browserOpen && !instagramLoading && (
+              <div className="flex items-center justify-center p-3 bg-neutral-700/30 rounded-lg">
+                <p className="text-sm text-neutral-400 mr-3">
+                  Having trouble with the embedded browser?
+                </p>
+                <button
+                  onClick={openInstagramInSystemBrowser}
+                  className="text-sm btn-secondary py-1 px-3 flex items-center gap-1"
+                >
+                  <Globe className="w-3 h-3" />
+                  Open Instagram in Browser
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Keyword Filter */}
@@ -382,12 +534,31 @@ export function Scraper() {
               <Search className="w-8 h-8 text-neutral-500" />
             </div>
             <h3 className="text-xl font-semibold mb-2">No reels found</h3>
-            <p className="text-neutral-400">
+            <p className="text-neutral-400 mb-4">
               {browserOpen 
-                ? 'Navigate to Instagram and click "Extract from current page" to find reels'
+                ? 'Navigate to Instagram reels and click "Extract from current page" to find reels'
                 : 'Open the Instagram browser to start extracting reels'
               }
             </p>
+            {!browserOpen && (
+              <div className="flex flex-col gap-2">
+                <button
+                  onClick={openInstagramBrowser}
+                  disabled={instagramLoading}
+                  className="btn-primary mx-auto flex items-center gap-2"
+                >
+                  <Play className="w-4 h-4" />
+                  {instagramLoading ? 'Loading...' : 'Open Instagram Browser'}
+                </button>
+                <button
+                  onClick={openInstagramInSystemBrowser}
+                  className="btn-secondary mx-auto flex items-center gap-2 text-sm"
+                >
+                  <Globe className="w-4 h-4" />
+                  Open in System Browser
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}

@@ -1,23 +1,73 @@
 import { app, BrowserWindow, ipcMain, dialog, shell, BrowserView } from 'electron'
 import { join } from 'path'
 import Store from 'electron-store'
-import { 
-  testConnection, 
-  addUrl, 
-  getStatus, 
-  getFileLinks, 
-  cancelTransfer, 
-  listTransfers 
+import { z } from 'zod'
+import {
+  testConnection,
+  addUrl,
+  getStatus,
+  getFileLinks,
+  cancelTransfer,
+  listTransfers,
+  TorboxClientConfig,
+  TorboxJobReference,
+  TorboxResult,
 } from './torbox-api'
 import { DownloadQueue } from './download-queue'
 import { SettingsService, SettingsError } from './settings-service'
 
 const store = new Store()
 const settingsService = new SettingsService(store)
-const downloadQueue = new DownloadQueue(store)
+const downloadQueue = new DownloadQueue(store, settingsService)
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged
 const rendererDevServerUrl = process.env.VITE_DEV_SERVER_URL ?? process.env.ELECTRON_RENDERER_URL
 let devContentSecurityPolicyConfigured = false
+
+const TorboxAddUrlSchema = z.object({
+  url: z.string().trim().url(),
+  name: z.string().trim().optional(),
+})
+
+const TorboxJobReferenceSchema = z
+  .object({
+    jobId: z.string().trim().min(1).optional(),
+    jobHash: z.string().trim().min(1).optional().nullable(),
+  })
+  .refine((value) => Boolean(value.jobId || value.jobHash), {
+    message: 'Provide a jobId or jobHash',
+  })
+
+const TorboxTestConnectionSchema = z.object({
+  apiKey: z.string().trim().min(1).optional(),
+  baseUrl: z.string().trim().url().optional(),
+})
+
+type TorboxJobReferenceInput = z.infer<typeof TorboxJobReferenceSchema>
+
+function buildTorboxConfig(overrides?: Partial<TorboxClientConfig>): TorboxClientConfig {
+  return {
+    apiKey: overrides?.apiKey ?? settingsService.getTorboxApiKey(),
+    baseUrl: overrides?.baseUrl ?? settingsService.getTorboxApiBaseUrl(),
+  }
+}
+
+function torboxValidationError(message: string, details: unknown): TorboxResult<never> {
+  return {
+    ok: false,
+    error: {
+      code: 'TORBOX_BAD_REQUEST',
+      message,
+      details,
+    },
+  }
+}
+
+function toJobReference(input: TorboxJobReferenceInput): TorboxJobReference {
+  return {
+    jobId: input.jobId ?? '',
+    jobHash: input.jobHash ?? undefined,
+  }
+}
 
 function createWindow(): BrowserWindow {
   const mainWindow = new BrowserWindow({
@@ -113,48 +163,63 @@ app.whenReady().then(() => {
   })
 
   // Torbox API IPC handlers
-  ipcMain.handle('torbox:testConnection', async (_, apiKey: string) => {
-    return await testConnection(apiKey)
+  ipcMain.handle('torbox:testConnection', async (_, payload: unknown) => {
+    const parsed = TorboxTestConnectionSchema.safeParse(payload ?? {})
+    if (!parsed.success) {
+      return torboxValidationError('Invalid payload for torbox:testConnection', parsed.error.flatten())
+    }
+
+    const overrides: Partial<TorboxClientConfig> = {}
+    if (parsed.data.apiKey) overrides.apiKey = parsed.data.apiKey
+    if (parsed.data.baseUrl) overrides.baseUrl = parsed.data.baseUrl
+
+    const config = buildTorboxConfig(overrides)
+    return await testConnection(config)
   })
 
-  ipcMain.handle('torbox:addUrl', async (_, url: string) => {
-    const apiKey = settingsService.getTorboxApiKey()
-    if (!apiKey) {
-      throw new Error('Torbox API key not configured')
+  ipcMain.handle('torbox:addUrl', async (_, payload: unknown) => {
+    const parsed = TorboxAddUrlSchema.safeParse(payload)
+    if (!parsed.success) {
+      return torboxValidationError('Invalid payload for torbox:addUrl', parsed.error.flatten())
     }
-    return await addUrl(url, apiKey)
+
+    const config = buildTorboxConfig()
+    return await addUrl(config, parsed.data)
   })
 
-  ipcMain.handle('torbox:getStatus', async (_, jobId: string) => {
-    const apiKey = settingsService.getTorboxApiKey()
-    if (!apiKey) {
-      throw new Error('Torbox API key not configured')
+  ipcMain.handle('torbox:getStatus', async (_, payload: unknown) => {
+    const parsed = TorboxJobReferenceSchema.safeParse(payload)
+    if (!parsed.success) {
+      return torboxValidationError('Invalid payload for torbox:getStatus', parsed.error.flatten())
     }
-    return await getStatus(jobId, apiKey)
+
+    const config = buildTorboxConfig()
+    return await getStatus(config, toJobReference(parsed.data))
   })
 
-  ipcMain.handle('torbox:getFileLinks', async (_, jobId: string) => {
-    const apiKey = settingsService.getTorboxApiKey()
-    if (!apiKey) {
-      throw new Error('Torbox API key not configured')
+  ipcMain.handle('torbox:getFileLinks', async (_, payload: unknown) => {
+    const parsed = TorboxJobReferenceSchema.safeParse(payload)
+    if (!parsed.success) {
+      return torboxValidationError('Invalid payload for torbox:getFileLinks', parsed.error.flatten())
     }
-    return await getFileLinks(jobId, apiKey)
+
+    const config = buildTorboxConfig()
+    return await getFileLinks(config, toJobReference(parsed.data))
   })
 
-  ipcMain.handle('torbox:cancel', async (_, jobId: string) => {
-    const apiKey = settingsService.getTorboxApiKey()
-    if (!apiKey) {
-      throw new Error('Torbox API key not configured')
+  ipcMain.handle('torbox:cancel', async (_, payload: unknown) => {
+    const parsed = TorboxJobReferenceSchema.safeParse(payload)
+    if (!parsed.success) {
+      return torboxValidationError('Invalid payload for torbox:cancel', parsed.error.flatten())
     }
-    return await cancelTransfer(jobId, apiKey)
+
+    const config = buildTorboxConfig()
+    return await cancelTransfer(config, toJobReference(parsed.data))
   })
 
   ipcMain.handle('torbox:list', async () => {
-    const apiKey = settingsService.getTorboxApiKey()
-    if (!apiKey) {
-      throw new Error('Torbox API key not configured')
-    }
-    return await listTransfers(apiKey)
+    const config = buildTorboxConfig()
+    return await listTransfers(config)
   })
 
   // Download queue IPC handlers

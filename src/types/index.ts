@@ -1,5 +1,6 @@
 export interface Settings {
   torboxApiKey?: string
+  torboxApiBaseUrl?: string
   downloadDir?: string
   theme: 'dark' | 'light'
   driveFolderId?: string
@@ -17,6 +18,7 @@ export interface QueueItem {
   progress: number
   error?: string
   jobId?: string
+  jobHash?: string
   localPath?: string
   addedAt: string
   completedAt?: string
@@ -50,6 +52,59 @@ export interface Toast {
   duration?: number
 }
 
+export interface TorboxError {
+  code: string
+  message: string
+  status?: number
+  details?: unknown
+}
+
+export type TorboxResult<T> = { ok: true; data: T } | { ok: false; error: TorboxError }
+
+export interface TorboxJobReference {
+  jobId: string
+  jobHash?: string | null
+}
+
+export type TorboxJobLifecycleStatus =
+  | 'queued'
+  | 'pending'
+  | 'processing'
+  | 'downloading'
+  | 'completed'
+  | 'failed'
+  | 'cancelled'
+
+export interface TorboxJobStatus {
+  jobId: string
+  jobHash?: string | null
+  status: TorboxJobLifecycleStatus
+  progress: number
+  bytesTotal?: number | null
+  bytesDownloaded?: number | null
+  message?: string
+  etaSeconds?: number | null
+  raw?: unknown
+}
+
+export interface TorboxFileLink {
+  url: string
+  filename?: string
+  sizeBytes?: number | null
+  expiresAt?: string | null
+  raw?: unknown
+}
+
+export interface TorboxCreateJobResult extends TorboxJobReference {
+  name?: string
+  raw?: unknown
+}
+
+export interface TorboxTestConnectionResult {
+  user?: Record<string, unknown>
+  detail?: unknown
+}
+
 declare global {
   interface Window {
     electronAPI: {
@@ -61,12 +116,12 @@ declare global {
         selectFolder: () => Promise<string | null>
       }
       torbox: {
-        testConnection: (apiKey: string) => Promise<boolean>
-        addUrl: (url: string) => Promise<{ jobId: string }>
-        getStatus: (jobId: string) => Promise<QueueItem>
-        getFileLinks: (jobId: string) => Promise<Array<{ url: string; filename: string; size: number }>>
-        cancel: (jobId: string) => Promise<boolean>
-        list: () => Promise<Array<any>>
+        testConnection: () => Promise<TorboxResult<TorboxTestConnectionResult>>
+        addUrl: (payload: { url: string; name?: string }) => Promise<TorboxResult<TorboxCreateJobResult>>
+        getStatus: (reference: TorboxJobReference) => Promise<TorboxResult<TorboxJobStatus>>
+        getFileLinks: (reference: TorboxJobReference) => Promise<TorboxResult<TorboxFileLink[]>>
+        cancel: (reference: TorboxJobReference) => Promise<TorboxResult<{ cancelled: boolean }>>
+        list: () => Promise<TorboxResult<any>>
       }
       queue: {
         get: () => Promise<QueueItem[]>

@@ -2,9 +2,18 @@ import Store from 'electron-store'
 import { z } from 'zod'
 import { app } from 'electron'
 
+const DEFAULT_TORBOX_BASE_URL = process.env.TORBOX_API_BASE_URL?.trim() || 'https://api.torbox.app'
+
+const TorboxBaseUrlSchema = z
+  .string()
+  .trim()
+  .min(1, 'Torbox API base URL is required')
+  .transform((value) => value.replace(/\/+$/, ''))
+
 // Zod schema for settings validation with defaults
 const SettingsSchema = z.object({
   torboxApiKey: z.string().default(''),
+  torboxApiBaseUrl: TorboxBaseUrlSchema.default(DEFAULT_TORBOX_BASE_URL),
   downloadDir: z.string().default(''),
   theme: z.enum(['dark', 'light']).default('dark'),
   driveFolderId: z.string().default(''),
@@ -127,6 +136,12 @@ export class SettingsService {
     return settings.torboxApiKey || ''
   }
 
+  getTorboxApiBaseUrl(): string {
+    const settings = this.getSettings()
+    const baseUrl = settings.torboxApiBaseUrl || DEFAULT_TORBOX_BASE_URL
+    return baseUrl.replace(/\/+$/, '')
+  }
+
   /**
    * Check if Torbox API is configured
    */
@@ -139,6 +154,11 @@ export class SettingsService {
    */
   setTorboxApiKey(apiKey: string): Settings {
     return this.updateSettings({ torboxApiKey: apiKey.trim() })
+  }
+
+  setTorboxApiBaseUrl(baseUrl: string): Settings {
+    const sanitized = TorboxBaseUrlSchema.parse(baseUrl)
+    return this.updateSettings({ torboxApiBaseUrl: sanitized })
   }
 
   /**

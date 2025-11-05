@@ -19,6 +19,7 @@ export function SettingsProvider({ children }: SettingsProviderProps) {
     theme: 'dark',
     syncToDrive: false,
     torboxApiKey: '',
+    torboxApiBaseUrl: 'https://api.torbox.app',
     downloadDir: '',
     driveFolderId: '',
   })

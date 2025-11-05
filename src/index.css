@@ -1,0 +1,127 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    @apply border-neutral-800;
+  }
+  
+  body {
+    @apply bg-neutral-900 text-neutral-100 antialiased;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+  
+  /* Custom scrollbar */
+  ::-webkit-scrollbar {
+    @apply w-2;
+  }
+  
+  ::-webkit-scrollbar-track {
+    @apply bg-neutral-900;
+  }
+  
+  ::-webkit-scrollbar-thumb {
+    @apply bg-neutral-700 rounded-full;
+  }
+  
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-neutral-600;
+  }
+}
+
+@layer components {
+  /* Glassmorphism base */
+  .glass {
+    @apply bg-white/5 backdrop-blur-md border border-white/10;
+  }
+  
+  .glass-dark {
+    @apply bg-black/30 backdrop-blur-md border border-white/10;
+  }
+  
+  /* Button variants */
+  .btn-primary {
+    @apply bg-primary-600 hover:bg-primary-700 text-white px-4 py-2 rounded-lg transition-all duration-200 hover:scale-105 active:scale-95;
+  }
+  
+  .btn-secondary {
+    @apply glass hover:bg-white/10 text-neutral-100 px-4 py-2 rounded-lg transition-all duration-200 hover:scale-105 active:scale-95;
+  }
+  
+  .btn-ghost {
+    @apply hover:bg-white/5 text-neutral-400 hover:text-neutral-100 px-3 py-2 rounded-lg transition-all duration-200;
+  }
+  
+  /* Card styles */
+  .card {
+    @apply glass-dark rounded-xl p-6 transition-all duration-300 hover:bg-white/10;
+  }
+  
+  .card-hover {
+    @apply card hover:scale-105 hover:shadow-2xl cursor-pointer;
+  }
+  
+  /* Input styles */
+  .input {
+    @apply glass-dark border-white/10 rounded-lg px-4 py-2 text-neutral-100 placeholder-neutral-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent transition-all duration-200;
+  }
+  
+  /* Sidebar styles */
+  .sidebar-item {
+    @apply flex items-center gap-3 px-4 py-3 rounded-lg transition-all duration-200 hover:bg-white/10 cursor-pointer;
+  }
+  
+  .sidebar-item-active {
+    @apply sidebar-item bg-primary-600/20 text-primary-400 border-l-4 border-primary-500;
+  }
+  
+  /* Animation utilities */
+  .fade-in {
+    @apply animate-fade-in;
+  }
+  
+  .slide-up {
+    @apply animate-slide-up;
+  }
+  
+  .glass-appear {
+    @apply animate-glass-appear;
+  }
+  
+  /* Loading spinner */
+  .spinner {
+    @apply animate-spin rounded-full border-2 border-neutral-600 border-t-primary-500;
+  }
+  
+  /* Toast styles */
+  .toast {
+    @apply glass-dark rounded-lg px-4 py-3 shadow-lg transition-all duration-300 transform;
+  }
+  
+  .toast-success {
+    @apply toast border-green-500/20 text-green-400;
+  }
+  
+  .toast-error {
+    @apply toast border-red-500/20 text-red-400;
+  }
+  
+  .toast-info {
+    @apply toast border-blue-500/20 text-blue-400;
+  }
+}
+
+@layer utilities {
+  .text-shadow {
+    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+  }
+  
+  .glow {
+    box-shadow: 0 0 20px rgba(34, 197, 94, 0.3);
+  }
+  
+  .glow-error {
+    box-shadow: 0 0 20px rgba(239, 68, 68, 0.3);
+  }
+}

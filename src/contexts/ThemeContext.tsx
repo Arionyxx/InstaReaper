@@ -1,5 +1,5 @@
-import React, { createContext, useContext, useEffect, useState } from 'react'
-import { useToast } from '@/contexts/ToastContext'
+import React, { createContext, useContext, useEffect, useState, useCallback } from 'react'
+import { useSettings } from '@/contexts/SettingsContext'
 
 interface ThemeContextType {
   theme: 'dark' | 'light'
@@ -10,24 +10,10 @@ interface ThemeContextType {
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined)
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const [theme, setThemeState] = useState<'dark' | 'light'>('dark')
-  const { addToast } = useToast()
+  const { settings, updateSettings } = useSettings()
+  const [theme, setThemeState] = useState<'dark' | 'light'>(settings.theme ?? 'dark')
 
-  useEffect(() => {
-    loadTheme()
-  }, [])
-
-  const loadTheme = async () => {
-    try {
-      const settings = await window.electronAPI.settings.get()
-      setThemeState(settings.theme)
-      applyTheme(settings.theme)
-    } catch (error) {
-      console.error('Failed to load theme:', error)
-    }
-  }
-
-  const applyTheme = (newTheme: 'dark' | 'light') => {
+  const applyTheme = useCallback((newTheme: 'dark' | 'light') => {
     if (newTheme === 'light') {
       document.documentElement.classList.add('light')
       document.documentElement.classList.remove('dark')
@@ -35,24 +21,37 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
       document.documentElement.classList.add('dark')
       document.documentElement.classList.remove('light')
     }
-  }
+  }, [])
 
-  const toggleTheme = async () => {
-    const newTheme = theme === 'dark' ? 'light' : 'dark'
-    await setTheme(newTheme)
-  }
+  useEffect(() => {
+    applyTheme(theme)
+  }, [theme, applyTheme])
 
-  const setTheme = async (newTheme: 'dark' | 'light') => {
-    setThemeState(newTheme)
-    applyTheme(newTheme)
-    
-    try {
-      const settings = await window.electronAPI.settings.get()
-      await window.electronAPI.settings.set({ ...settings, theme: newTheme })
-    } catch (error) {
-      console.error('Failed to save theme:', error)
-    }
-  }
+  useEffect(() => {
+    setThemeState((prevTheme) => {
+      if (settings.theme && settings.theme !== prevTheme) {
+        return settings.theme
+      }
+      return prevTheme
+    })
+  }, [settings.theme])
+
+  const setTheme = useCallback(
+    (newTheme: 'dark' | 'light') => {
+      setThemeState(newTheme)
+      applyTheme(newTheme)
+
+      updateSettings({ theme: newTheme }).catch((error) => {
+        console.error('Failed to save theme:', error)
+      })
+    },
+    [applyTheme, updateSettings],
+  )
+
+  const toggleTheme = useCallback(() => {
+    const nextTheme = theme === 'dark' ? 'light' : 'dark'
+    setTheme(nextTheme)
+  }, [theme, setTheme])
 
   return (
     <ThemeContext.Provider value={{ theme, toggleTheme, setTheme }}>

@@ -14,6 +14,9 @@ import { DownloadQueue } from './download-queue'
 
 const store = new Store()
 const downloadQueue = new DownloadQueue(store)
+const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged
+const rendererDevServerUrl = process.env.VITE_DEV_SERVER_URL ?? process.env.ELECTRON_RENDERER_URL
+let devContentSecurityPolicyConfigured = false
 
 const SettingsSchema = z.object({
   torboxApiKey: z.string().optional(),
@@ -33,7 +36,7 @@ function createWindow(): BrowserWindow {
     autoHideMenuBar: true,
     titleBarStyle: 'hiddenInset',
     webPreferences: {
-      preload: join(__dirname, '../preload/index.js'),
+      preload: join(__dirname, 'preload.js'),
       sandbox: false,
       contextIsolation: true,
       nodeIntegration: false,
@@ -49,10 +52,39 @@ function createWindow(): BrowserWindow {
     return { action: 'deny' }
   })
 
-  if (process.env.NODE_ENV === 'development' && process.env['ELECTRON_RENDERER_URL']) {
-    mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
+  if (isDev) {
+    const devServerUrl = rendererDevServerUrl ?? 'http://localhost:5173'
+
+    try {
+      const rendererOrigin = new URL(devServerUrl).origin
+      const wsOrigin = rendererOrigin.replace(/^http/, 'ws')
+      const devCspDirectives = [
+        `default-src 'self' ${rendererOrigin}`,
+        `script-src 'self' 'unsafe-inline' 'unsafe-eval' ${rendererOrigin}`,
+        `style-src 'self' 'unsafe-inline' ${rendererOrigin}`,
+        "img-src 'self' data: blob: https:",
+        `connect-src 'self' ${rendererOrigin} ${wsOrigin} https:`,
+        "frame-src https://www.instagram.com",
+        "font-src 'self' data:",
+      ].join('; ')
+
+      if (!devContentSecurityPolicyConfigured) {
+        mainWindow.webContents.session.webRequest.onHeadersReceived((details, callback) => {
+          const responseHeaders = { ...(details.responseHeaders ?? {}) }
+          if (details.resourceType === 'mainFrame') {
+            responseHeaders['Content-Security-Policy'] = [devCspDirectives]
+          }
+          callback({ responseHeaders })
+        })
+        devContentSecurityPolicyConfigured = true
+      }
+    } catch (error) {
+      console.warn('Failed to configure development CSP', error)
+    }
+
+    mainWindow.loadURL(devServerUrl)
   } else {
-    mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
+    mainWindow.loadFile(join(__dirname, '../dist/index.html'))
   }
 
   return mainWindow
@@ -165,7 +197,7 @@ app.whenReady().then(() => {
 
     instagramView = new BrowserView({
       webPreferences: {
-        preload: join(__dirname, '../preload/instagram-preload.js'),
+        preload: join(__dirname, 'instagram-preload.js'),
         contextIsolation: true,
         nodeIntegration: false,
       },

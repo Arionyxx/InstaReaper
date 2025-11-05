@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react'
 import { LibraryItem } from '@/types'
 import { useToast } from '@/contexts/ToastContext'
+import { useSettings } from '@/contexts/SettingsContext'
+import { DownloadDirBanner } from '@/components/DownloadDirBanner'
 import { 
   Play, 
   Trash2, 
@@ -24,6 +26,7 @@ export function Library() {
   const [loading, setLoading] = useState(false)
   const [deleting, setDeleting] = useState<string | null>(null)
   const { addToast } = useToast()
+  const { isDownloadDirConfigured } = useSettings()
 
   useEffect(() => {
     scanLibrary()
@@ -34,15 +37,26 @@ export function Library() {
   }, [library, searchTerm, keywordFilter])
 
   const scanLibrary = async () => {
+    if (!isDownloadDirConfigured) {
+      return
+    }
+
     try {
       setLoading(true)
       const items = await window.electronAPI.library.scan()
       setLibrary(items)
     } catch (error) {
-      addToast({
-        type: 'error',
-        message: 'Failed to scan library',
-      })
+      if (error instanceof Error && error.message.includes('DOWNLOAD_DIR_MISSING')) {
+        addToast({
+          type: 'error',
+          message: 'Please choose a download folder in Settings',
+        })
+      } else {
+        addToast({
+          type: 'error',
+          message: 'Failed to scan library',
+        })
+      }
     } finally {
       setLoading(false)
     }
@@ -120,6 +134,8 @@ export function Library() {
 
   return (
     <div className="space-y-6">
+      <DownloadDirBanner />
+      
       {/* Controls */}
       <div className="glass-dark rounded-xl p-6">
         <div className="flex flex-col gap-4">
@@ -182,7 +198,7 @@ export function Library() {
             
             <button
               onClick={scanLibrary}
-              disabled={loading}
+              disabled={loading || !isDownloadDirConfigured}
               className="btn-secondary flex items-center gap-2 disabled:opacity-50"
             >
               {loading ? (

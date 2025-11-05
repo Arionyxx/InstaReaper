@@ -16,6 +16,7 @@ export function SettingsPage() {
     syncToDrive: false,
   })
   const [testingConnection, setTestingConnection] = useState(false)
+  const [loading, setLoading] = useState(false)
   const { addToast } = useToast()
 
   useEffect(() => {
@@ -34,8 +35,9 @@ export function SettingsPage() {
     }
   }
 
-  const saveSettings = async (newSettings: Partial<Settings>) => {
+  const saveSettings = async (newSettings: Partial<SettingsType>) => {
     try {
+      setLoading(true)
       const updatedSettings = await window.electronAPI.settings.set({
         ...settings,
         ...newSettings,
@@ -50,6 +52,8 @@ export function SettingsPage() {
         type: 'error',
         message: 'Failed to save settings',
       })
+    } finally {
+      setLoading(false)
     }
   }
 
@@ -88,7 +92,7 @@ export function SettingsPage() {
 
   const selectDownloadDir = async () => {
     try {
-      const dir = await window.electronAPI.settings.selectDownloadDir()
+      const dir = await window.electronAPI.dialog.selectFolder()
       if (dir) {
         await saveSettings({ downloadDir: dir })
       }

@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react'
 import { Reel } from '@/types'
 import { useToast } from '@/contexts/ToastContext'
+import { useSettings } from '@/contexts/SettingsContext'
+import { DownloadDirBanner } from '@/components/DownloadDirBanner'
 import { 
   Search, 
   Download, 
@@ -24,6 +26,7 @@ export function Scraper() {
   const [browserOpen, setBrowserOpen] = useState(false)
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid')
   const { addToast } = useToast()
+  const { isDownloadDirConfigured } = useSettings()
 
   useEffect(() => {
     // Listen for reels found from Instagram
@@ -138,6 +141,14 @@ export function Scraper() {
       return
     }
 
+    if (!isDownloadDirConfigured) {
+      addToast({
+        type: 'error',
+        message: 'Please choose a download folder in Settings first',
+      })
+      return
+    }
+
     try {
       setLoading(true)
       const reelsToDownload = filteredReels.filter(r => selectedReels.has(r.id))
@@ -159,10 +170,17 @@ export function Scraper() {
       // Clear selection
       setSelectedReels(new Set())
     } catch (error) {
-      addToast({
-        type: 'error',
-        message: 'Failed to add reels to queue',
-      })
+      if (error instanceof Error && error.message.includes('DOWNLOAD_DIR_MISSING')) {
+        addToast({
+          type: 'error',
+          message: 'Please choose a download folder in Settings',
+        })
+      } else {
+        addToast({
+          type: 'error',
+          message: 'Failed to add reels to queue',
+        })
+      }
     } finally {
       setLoading(false)
     }
@@ -174,6 +192,8 @@ export function Scraper() {
 
   return (
     <div className="space-y-6">
+      <DownloadDirBanner />
+      
       {/* Controls */}
       <div className="glass-dark rounded-xl p-6">
         <div className="flex flex-col gap-4">
@@ -276,7 +296,7 @@ export function Scraper() {
 
                 <button
                   onClick={downloadSelected}
-                  disabled={selectedReels.size === 0 || loading}
+                  disabled={selectedReels.size === 0 || loading || !isDownloadDirConfigured}
                   className="btn-primary flex items-center gap-2 disabled:opacity-50"
                 >
                   {loading ? (

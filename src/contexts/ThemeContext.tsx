@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useState } from 'react'
-import { Settings } from '@/types'
+import { useToast } from '@/contexts/ToastContext'
 
 interface ThemeContextType {
   theme: 'dark' | 'light'
@@ -11,6 +11,7 @@ const ThemeContext = createContext<ThemeContextType | undefined>(undefined)
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [theme, setThemeState] = useState<'dark' | 'light'>('dark')
+  const { addToast } = useToast()
 
   useEffect(() => {
     loadTheme()

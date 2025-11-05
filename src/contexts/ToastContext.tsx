@@ -24,13 +24,13 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
 
     if (newToast.duration && newToast.duration > 0) {
       setTimeout(() => {
-        removeToast(id)
+        setToasts(prev => prev.filter(t => t.id !== id))
       }, newToast.duration)
     }
   }, [])
 
   const removeToast = useCallback((id: string) => {
-    setToasts(prev => prev.filter(toast => toast.id !== id))
+    setToasts(prev => prev.filter(t => t.id !== id))
   }, [])
 
   return (

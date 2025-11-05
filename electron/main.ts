@@ -1,7 +1,6 @@
 import { app, BrowserWindow, ipcMain, dialog, shell, BrowserView } from 'electron'
 import { join } from 'path'
 import Store from 'electron-store'
-import { z } from 'zod'
 import { 
   testConnection, 
   addUrl, 
@@ -11,20 +10,14 @@ import {
   listTransfers 
 } from './torbox-api'
 import { DownloadQueue } from './download-queue'
+import { SettingsService, SettingsError } from './settings-service'
 
 const store = new Store()
+const settingsService = new SettingsService(store)
 const downloadQueue = new DownloadQueue(store)
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged
 const rendererDevServerUrl = process.env.VITE_DEV_SERVER_URL ?? process.env.ELECTRON_RENDERER_URL
 let devContentSecurityPolicyConfigured = false
-
-const SettingsSchema = z.object({
-  torboxApiKey: z.string().optional(),
-  downloadDir: z.string().optional(),
-  theme: z.enum(['dark', 'light']).default('dark'),
-  driveFolderId: z.string().optional(),
-  syncToDrive: z.boolean().default(false),
-})
 
 function createWindow(): BrowserWindow {
   const mainWindow = new BrowserWindow({
@@ -101,23 +94,21 @@ app.whenReady().then(() => {
 
   // Settings IPC handlers
   ipcMain.handle('settings:get', () => {
-    return store.get('settings', {
-      theme: 'dark',
-      syncToDrive: false,
-    })
+    return settingsService.getSettings()
   })
 
   ipcMain.handle('settings:set', (_, settings) => {
-    const validated = SettingsSchema.parse(settings)
-    store.set('settings', validated)
-    return validated
+    return settingsService.updateSettings(settings)
   })
 
-  ipcMain.handle('settings:selectDownloadDir', async () => {
+  ipcMain.handle('dialog:selectFolder', async () => {
     const result = await dialog.showOpenDialog(mainWindow, {
       properties: ['openDirectory'],
       title: 'Select Download Directory',
     })
+    if (result.canceled || !result.filePaths.length) {
+      return null
+    }
     return result.filePaths[0]
   })
 
@@ -127,28 +118,43 @@ app.whenReady().then(() => {
   })
 
   ipcMain.handle('torbox:addUrl', async (_, url: string) => {
-    const settings = store.get('settings') as any
-    return await addUrl(url, settings.torboxApiKey)
+    const apiKey = settingsService.getTorboxApiKey()
+    if (!apiKey) {
+      throw new Error('Torbox API key not configured')
+    }
+    return await addUrl(url, apiKey)
   })
 
   ipcMain.handle('torbox:getStatus', async (_, jobId: string) => {
-    const settings = store.get('settings') as any
-    return await getStatus(jobId, settings.torboxApiKey)
+    const apiKey = settingsService.getTorboxApiKey()
+    if (!apiKey) {
+      throw new Error('Torbox API key not configured')
+    }
+    return await getStatus(jobId, apiKey)
   })
 
   ipcMain.handle('torbox:getFileLinks', async (_, jobId: string) => {
-    const settings = store.get('settings') as any
-    return await getFileLinks(jobId, settings.torboxApiKey)
+    const apiKey = settingsService.getTorboxApiKey()
+    if (!apiKey) {
+      throw new Error('Torbox API key not configured')
+    }
+    return await getFileLinks(jobId, apiKey)
   })
 
   ipcMain.handle('torbox:cancel', async (_, jobId: string) => {
-    const settings = store.get('settings') as any
-    return await cancelTransfer(jobId, settings.torboxApiKey)
+    const apiKey = settingsService.getTorboxApiKey()
+    if (!apiKey) {
+      throw new Error('Torbox API key not configured')
+    }
+    return await cancelTransfer(jobId, apiKey)
   })
 
   ipcMain.handle('torbox:list', async () => {
-    const settings = store.get('settings') as any
-    return await listTransfers(settings.torboxApiKey)
+    const apiKey = settingsService.getTorboxApiKey()
+    if (!apiKey) {
+      throw new Error('Torbox API key not configured')
+    }
+    return await listTransfers(apiKey)
   })
 
   // Download queue IPC handlers
@@ -178,9 +184,15 @@ app.whenReady().then(() => {
 
   // Library IPC handlers
   ipcMain.handle('library:scan', async () => {
-    const settings = store.get('settings') as any
-    const downloadDir = settings.downloadDir || join(app.getPath('downloads'), 'InstaReaper')
-    return await downloadQueue.scanLibrary(downloadDir)
+    try {
+      const downloadDir = settingsService.requireDownloadDir()
+      return await downloadQueue.scanLibrary(downloadDir)
+    } catch (error) {
+      if (error instanceof Error && error.message.includes(SettingsError.DOWNLOAD_DIR_MISSING)) {
+        throw error // Re-throw with the structured error
+      }
+      throw error
+    }
   })
 
   ipcMain.handle('library:delete', async (_, item: any) => {

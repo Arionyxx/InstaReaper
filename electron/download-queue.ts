@@ -1,4 +1,3 @@
-import { app } from 'electron'
 import { join } from 'path'
 import { promises as fs } from 'fs'
 import Store from 'electron-store'
@@ -157,12 +156,13 @@ export class DownloadQueue {
       this.saveQueue()
 
       const settings = this.store.get('settings') as any
-      if (!settings.torboxApiKey) {
+      const torboxApiKey = settings.torboxApiKey || ''
+      if (!torboxApiKey) {
         throw new Error('Torbox API key not configured')
       }
 
       // Add to Torbox
-      const result = await addUrl(item.url, settings.torboxApiKey)
+      const result = await addUrl(item.url, torboxApiKey)
       item.jobId = result.jobId
       item.status = 'downloading'
       this.saveQueue()
@@ -170,7 +170,7 @@ export class DownloadQueue {
       // Poll for completion
       this.activeDownloads.set(item.id, setInterval(async () => {
         try {
-          const status = await getStatus(result.jobId, settings.torboxApiKey)
+          const status = await getStatus(result.jobId, torboxApiKey)
           
           if (status.progress) {
             item.progress = status.progress
@@ -178,7 +178,7 @@ export class DownloadQueue {
 
           if (status.status === 'completed') {
             // Get file links and download
-            const files = await getFileLinks(result.jobId, settings.torboxApiKey)
+            const files = await getFileLinks(result.jobId, torboxApiKey)
             if (files.length > 0) {
               await this.downloadFile(item, files[0])
             }
@@ -218,7 +218,11 @@ export class DownloadQueue {
 
   private async downloadFile(item: QueueItem, file: { url: string; filename: string }): Promise<void> {
     const settings = this.store.get('settings') as any
-    const downloadDir = settings.downloadDir || join(app.getPath('downloads'), 'InstaReaper')
+    const downloadDir = settings.downloadDir
+    
+    if (!downloadDir || downloadDir.trim() === '') {
+      throw new Error('DOWNLOAD_DIR_MISSING: Choose a download folder in Settings')
+    }
     
     // Ensure download directory exists
     await fs.mkdir(downloadDir, { recursive: true })

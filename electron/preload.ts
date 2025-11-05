@@ -56,8 +56,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('settings:get'),
     set: (settings: unknown): Promise<z.infer<typeof SettingsSchema>> => 
       ipcRenderer.invoke('settings:set', settings),
-    selectDownloadDir: (): Promise<string> => 
-      ipcRenderer.invoke('settings:selectDownloadDir'),
+  },
+
+  // Dialog
+  dialog: {
+    selectFolder: (): Promise<string | null> => 
+      ipcRenderer.invoke('dialog:selectFolder'),
   },
 
   // Torbox API
@@ -132,7 +136,9 @@ export type ElectronAPI = {
   settings: {
     get: () => Promise<any>
     set: (settings: any) => Promise<any>
-    selectDownloadDir: () => Promise<string>
+  }
+  dialog: {
+    selectFolder: () => Promise<string | null>
   }
   torbox: {
     testConnection: (apiKey: string) => Promise<boolean>

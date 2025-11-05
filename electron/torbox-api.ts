@@ -49,6 +49,7 @@ async function makeRequest<T>(
 ): Promise<T> {
   try {
     const response = await fetch(`${TORBOX_BASE_URL}${endpoint}`, {
+      method: 'GET',
       ...options,
       headers: {
         'Authorization': `Bearer ${apiKey}`,

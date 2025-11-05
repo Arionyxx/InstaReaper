@@ -1,7 +1,6 @@
 import React from 'react'
-import { Outlet, useLocation, useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { 
-  Search, 
   Download, 
   FolderOpen, 
   Settings, 

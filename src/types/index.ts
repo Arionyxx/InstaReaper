@@ -56,7 +56,9 @@ declare global {
       settings: {
         get: () => Promise<Settings>
         set: (settings: Settings) => Promise<Settings>
-        selectDownloadDir: () => Promise<string>
+      }
+      dialog: {
+        selectFolder: () => Promise<string | null>
       }
       torbox: {
         testConnection: (apiKey: string) => Promise<boolean>

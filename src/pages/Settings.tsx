@@ -10,10 +10,16 @@ import {
   Cloud
 } from 'lucide-react'
 
+const DEFAULT_TORBOX_BASE_URL = 'https://api.torbox.app'
+
 export function SettingsPage() {
   const [settings, setSettings] = useState<SettingsType>({
     theme: 'dark',
     syncToDrive: false,
+    torboxApiKey: '',
+    torboxApiBaseUrl: DEFAULT_TORBOX_BASE_URL,
+    downloadDir: '',
+    driveFolderId: '',
   })
   const [testingConnection, setTestingConnection] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -26,7 +32,14 @@ export function SettingsPage() {
   const loadSettings = async () => {
     try {
       const savedSettings = await window.electronAPI.settings.get()
-      setSettings(savedSettings)
+      setSettings((prev) => ({
+        ...prev,
+        ...savedSettings,
+        torboxApiKey: savedSettings.torboxApiKey ?? '',
+        torboxApiBaseUrl: savedSettings.torboxApiBaseUrl || DEFAULT_TORBOX_BASE_URL,
+        downloadDir: savedSettings.downloadDir ?? '',
+        driveFolderId: savedSettings.driveFolderId ?? '',
+      }))
     } catch (error) {
       addToast({
         type: 'error',
@@ -38,11 +51,25 @@ export function SettingsPage() {
   const saveSettings = async (newSettings: Partial<SettingsType>) => {
     try {
       setLoading(true)
-      const updatedSettings = await window.electronAPI.settings.set({
+      const nextSettings: SettingsType = {
         ...settings,
         ...newSettings,
+        torboxApiKey: (newSettings.torboxApiKey ?? settings.torboxApiKey) || '',
+        torboxApiBaseUrl:
+          (newSettings.torboxApiBaseUrl ?? settings.torboxApiBaseUrl || DEFAULT_TORBOX_BASE_URL) ||
+          DEFAULT_TORBOX_BASE_URL,
+        downloadDir: newSettings.downloadDir ?? settings.downloadDir ?? '',
+        driveFolderId: newSettings.driveFolderId ?? settings.driveFolderId ?? '',
+      }
+
+      const updatedSettings = await window.electronAPI.settings.set(nextSettings)
+      setSettings({
+        ...updatedSettings,
+        torboxApiKey: updatedSettings.torboxApiKey ?? '',
+        torboxApiBaseUrl: updatedSettings.torboxApiBaseUrl || DEFAULT_TORBOX_BASE_URL,
+        downloadDir: updatedSettings.downloadDir ?? '',
+        driveFolderId: updatedSettings.driveFolderId ?? '',
       })
-      setSettings(updatedSettings)
       addToast({
         type: 'success',
         message: 'Settings saved successfully',
@@ -68,16 +95,47 @@ export function SettingsPage() {
 
     setTestingConnection(true)
     try {
-      const success = await window.electronAPI.torbox.testConnection(settings.torboxApiKey)
-      if (success) {
+      const normalizedSettings: SettingsType = {
+        ...settings,
+        torboxApiKey: settings.torboxApiKey || '',
+        torboxApiBaseUrl: settings.torboxApiBaseUrl || DEFAULT_TORBOX_BASE_URL,
+        downloadDir: settings.downloadDir ?? '',
+        driveFolderId: settings.driveFolderId ?? '',
+      }
+
+      const persistedSettings = await window.electronAPI.settings.set(normalizedSettings)
+      setSettings({
+        ...persistedSettings,
+        torboxApiKey: persistedSettings.torboxApiKey ?? '',
+        torboxApiBaseUrl: persistedSettings.torboxApiBaseUrl || DEFAULT_TORBOX_BASE_URL,
+        downloadDir: persistedSettings.downloadDir ?? '',
+        driveFolderId: persistedSettings.driveFolderId ?? '',
+      })
+
+      const result = await window.electronAPI.torbox.testConnection()
+
+      if (result.ok) {
         addToast({
           type: 'success',
           message: 'Torbox connection successful!',
         })
       } else {
+        const detailFromError = (() => {
+          if (!result.error.details) return undefined
+          if (typeof result.error.details === 'string') return result.error.details
+          if (typeof (result.error.details as any)?.detail === 'string') {
+            return (result.error.details as any).detail as string
+          }
+          return undefined
+        })()
+
+        const errorLabel = [result.error.message, result.error.code ? `(${result.error.code})` : '']
+          .filter(Boolean)
+          .join(' ')
+
         addToast({
           type: 'error',
-          message: 'Torbox connection failed. Please check your API key.',
+          message: detailFromError ? `${errorLabel} - ${detailFromError}` : errorLabel,
         })
       }
     } catch (error) {
@@ -113,6 +171,20 @@ export function SettingsPage() {
         </h2>
         
         <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium mb-2">API Base URL</label>
+            <input
+              type="text"
+              value={settings.torboxApiBaseUrl || ''}
+              onChange={(e) => setSettings({ ...settings, torboxApiBaseUrl: e.target.value })}
+              placeholder="https://api.torbox.app"
+              className="w-full input"
+            />
+            <p className="text-xs text-neutral-500 mt-2">
+              Default: https://api.torbox.app. Override only if Torbox instructs you to use a different endpoint.
+            </p>
+          </div>
+
           <div>
             <label className="block text-sm font-medium mb-2">API Key</label>
             <div className="flex gap-3">

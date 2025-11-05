@@ -1,7 +1,16 @@
 import { join } from 'path'
 import { promises as fs } from 'fs'
 import Store from 'electron-store'
-import { addUrl, getStatus, getFileLinks } from './torbox-api'
+import {
+  addUrl,
+  getStatus,
+  getFileLinks,
+  TorboxFileLink,
+  TorboxJobReference,
+  TorboxResult,
+  TorboxError,
+} from './torbox-api'
+import { SettingsService } from './settings-service'
 
 export interface QueueItem {
   id: string
@@ -14,6 +23,7 @@ export interface QueueItem {
   progress: number
   error?: string
   jobId?: string
+  jobHash?: string
   localPath?: string
   addedAt: string
   completedAt?: string
@@ -36,9 +46,11 @@ export class DownloadQueue {
   private queue: QueueItem[] = []
   private activeDownloads = new Map<string, NodeJS.Timeout>()
   private store: Store
+  private settingsService: SettingsService
 
-  constructor(store: Store) {
+  constructor(store: Store, settingsService: SettingsService) {
     this.store = store
+    this.settingsService = settingsService
     this.loadQueue()
     this.startProcessing()
   }
@@ -49,6 +61,102 @@ export class DownloadQueue {
 
   private saveQueue(): void {
     this.store.set('downloadQueue', this.queue)
+  }
+
+  private getTorboxConfig() {
+    return {
+      apiKey: this.settingsService.getTorboxApiKey(),
+      baseUrl: this.settingsService.getTorboxApiBaseUrl(),
+    }
+  }
+
+  private ensureTorboxConfigured() {
+    const config = this.getTorboxConfig()
+    if (!config.apiKey || !config.apiKey.trim()) {
+      throw new Error('Torbox API key not configured')
+    }
+    return config
+  }
+
+  private static formatTorboxError(error: TorboxError): string {
+    const parts: string[] = [error.message]
+
+    if (error.code) {
+      parts.push(`(${error.code})`)
+    }
+
+    const detail = (() => {
+      if (!error.details) return undefined
+      if (typeof error.details === 'string') return error.details
+      if (typeof (error.details as any)?.detail === 'string') return (error.details as any).detail as string
+      return undefined
+    })()
+
+    if (detail) {
+      parts.push(`- ${detail}`)
+    }
+
+    return parts.filter(Boolean).join(' ')
+  }
+
+  private static unwrapTorboxResult<T>(result: TorboxResult<T>, context: string): T {
+    if (result.ok) {
+      return result.data
+    }
+
+    const message = DownloadQueue.formatTorboxError(result.error)
+    throw new Error(context ? `${context}: ${message}` : message)
+  }
+
+  private clearActiveDownload(itemId: string): void {
+    const timer = this.activeDownloads.get(itemId)
+    if (timer) {
+      clearInterval(timer)
+      this.activeDownloads.delete(itemId)
+    }
+  }
+
+  private handleDownloadError(item: QueueItem, error: unknown): void {
+    console.error('[DownloadQueue] Failed to process Torbox job', {
+      itemId: item.id,
+      jobId: item.jobId,
+      error,
+    })
+    item.status = 'failed'
+    item.error = error instanceof Error ? error.message : 'Unknown error'
+    this.clearActiveDownload(item.id)
+    this.saveQueue()
+  }
+
+  private resolveFilename(item: QueueItem, file: TorboxFileLink): string {
+    if (file.filename && file.filename.trim()) {
+      return file.filename.trim()
+    }
+
+    const extension = this.extractExtension(file) ?? 'mp4'
+    const ownerSlug = (item.owner || 'instareaper').replace(/[^a-z0-9_-]+/gi, '_')
+    return `${ownerSlug}-${item.id}.${extension}`
+  }
+
+  private extractExtension(file: TorboxFileLink): string | null {
+    if (file.filename && file.filename.includes('.')) {
+      const ext = file.filename.split('.').pop()
+      if (ext) {
+        return ext
+      }
+    }
+
+    try {
+      const url = new URL(file.url)
+      const match = url.pathname.match(/\.([a-z0-9]{2,5})$/i)
+      if (match) {
+        return match[1]
+      }
+    } catch {
+      // ignore URL parsing failures
+    }
+
+    return null
   }
 
   getQueue(): QueueItem[] {
@@ -81,10 +189,7 @@ export class DownloadQueue {
     }
 
     item.status = 'paused'
-    if (this.activeDownloads.has(itemId)) {
-      clearTimeout(this.activeDownloads.get(itemId)!)
-      this.activeDownloads.delete(itemId)
-    }
+    this.clearActiveDownload(itemId)
     this.saveQueue()
     return true
   }
@@ -107,10 +212,7 @@ export class DownloadQueue {
       return false
     }
 
-    if (this.activeDownloads.has(itemId)) {
-      clearTimeout(this.activeDownloads.get(itemId)!)
-      this.activeDownloads.delete(itemId)
-    }
+    this.clearActiveDownload(itemId)
 
     item.status = 'failed'
     item.error = 'Cancelled by user'
@@ -128,6 +230,7 @@ export class DownloadQueue {
     item.error = undefined
     item.progress = 0
     item.jobId = undefined
+    item.jobHash = undefined
     item.retryCount++
     this.saveQueue()
     return true
@@ -153,104 +256,113 @@ export class DownloadQueue {
   private async processItem(item: QueueItem): Promise<void> {
     try {
       item.status = 'active'
+      item.error = undefined
       this.saveQueue()
 
-      const settings = this.store.get('settings') as any
-      const torboxApiKey = settings.torboxApiKey || ''
-      if (!torboxApiKey) {
-        throw new Error('Torbox API key not configured')
+      const config = this.ensureTorboxConfigured()
+
+      const addResult = await addUrl(config, { url: item.url, name: item.owner })
+      const job = DownloadQueue.unwrapTorboxResult(addResult, 'Failed to create Torbox download job')
+
+      item.jobId = job.jobId
+      item.jobHash = job.jobHash ?? undefined
+      item.status = 'downloading'
+      item.progress = 0
+      this.saveQueue()
+
+      const pollReference: TorboxJobReference = {
+        jobId: item.jobId!,
+        jobHash: item.jobHash,
       }
 
-      // Add to Torbox
-      const result = await addUrl(item.url, torboxApiKey)
-      item.jobId = result.jobId
-      item.status = 'downloading'
-      this.saveQueue()
+      this.activeDownloads.set(
+        item.id,
+        setInterval(async () => {
+          try {
+            const statusResult = await getStatus(config, pollReference)
+            const status = DownloadQueue.unwrapTorboxResult(statusResult, 'Failed to retrieve Torbox job status')
 
-      // Poll for completion
-      this.activeDownloads.set(item.id, setInterval(async () => {
-        try {
-          const status = await getStatus(result.jobId, torboxApiKey)
-          
-          if (status.progress) {
-            item.progress = status.progress
-          }
-
-          if (status.status === 'completed') {
-            // Get file links and download
-            const files = await getFileLinks(result.jobId, torboxApiKey)
-            if (files.length > 0) {
-              await this.downloadFile(item, files[0])
+            if (status.jobHash && status.jobHash !== item.jobHash) {
+              item.jobHash = status.jobHash ?? undefined
+              pollReference.jobHash = status.jobHash ?? undefined
             }
-            
-            item.status = 'completed'
-            item.completedAt = new Date().toISOString()
-            item.progress = 100
-            
-            if (this.activeDownloads.has(item.id)) {
-              clearInterval(this.activeDownloads.get(item.id)!)
-              this.activeDownloads.delete(item.id)
-            }
-            
-            this.saveQueue()
-          } else if (status.status === 'failed') {
-            throw new Error(status.error || 'Download failed')
-          }
-        } catch (error) {
-          item.status = 'failed'
-          item.error = error instanceof Error ? error.message : 'Unknown error'
-          
-          if (this.activeDownloads.has(item.id)) {
-            clearInterval(this.activeDownloads.get(item.id)!)
-            this.activeDownloads.delete(item.id)
-          }
-          
-          this.saveQueue()
-        }
-      }, 3000))
 
+            if (typeof status.progress === 'number') {
+              item.progress = Math.max(item.progress, status.progress)
+              this.saveQueue()
+            }
+
+            if (status.status === 'completed') {
+              const linksResult = await getFileLinks(config, pollReference)
+
+              if (!linksResult.ok) {
+                if (linksResult.error.code === 'TORBOX_NO_LINKS') {
+                  return
+                }
+                throw new Error(DownloadQueue.formatTorboxError(linksResult.error))
+              }
+
+              const links = linksResult.data
+
+              if (links.length > 0) {
+                await this.downloadFile(item, links[0])
+              }
+
+              item.status = 'completed'
+              item.completedAt = new Date().toISOString()
+              item.progress = 100
+
+              this.clearActiveDownload(item.id)
+              this.saveQueue()
+            } else if (status.status === 'failed') {
+              throw new Error(status.message ?? 'Torbox reported that the job failed')
+            } else if (status.status === 'cancelled') {
+              throw new Error('Torbox job was cancelled')
+            }
+          } catch (error) {
+            this.handleDownloadError(item, error)
+          }
+        }, 3000)
+      )
     } catch (error) {
-      item.status = 'failed'
-      item.error = error instanceof Error ? error.message : 'Unknown error'
-      this.saveQueue()
+      this.handleDownloadError(item, error)
     }
   }
 
-  private async downloadFile(item: QueueItem, file: { url: string; filename: string }): Promise<void> {
-    const settings = this.store.get('settings') as any
-    const downloadDir = settings.downloadDir
-    
-    if (!downloadDir || downloadDir.trim() === '') {
-      throw new Error('DOWNLOAD_DIR_MISSING: Choose a download folder in Settings')
-    }
-    
-    // Ensure download directory exists
+  private async downloadFile(item: QueueItem, file: TorboxFileLink): Promise<void> {
+    const downloadDir = this.settingsService.requireDownloadDir()
+
     await fs.mkdir(downloadDir, { recursive: true })
 
-    // Generate filename
-    const extension = file.filename.split('.').pop() || 'mp4'
-    const filename = `${item.owner}-${item.id}.${extension}`
+    const filename = this.resolveFilename(item, file)
     const filePath = join(downloadDir, filename)
 
-    // Download file
     const response = await fetch(file.url)
     if (!response.ok) {
-      throw new Error(`Failed to download: ${response.statusText}`)
+      throw new Error(`Failed to download from Torbox: ${response.status} ${response.statusText}`)
     }
 
     const buffer = await response.arrayBuffer()
     await fs.writeFile(filePath, Buffer.from(buffer))
 
-    // Save metadata
     const metadataPath = filePath.replace(/\.[^.]+$/, '.json')
-    await fs.writeFile(metadataPath, JSON.stringify({
-      owner: item.owner,
-      caption: item.caption,
-      keywords: item.keywords,
-      addedAt: item.addedAt,
-      source: item.url,
-      thumbnail: item.thumbnail,
-    }, null, 2))
+    await fs.writeFile(
+      metadataPath,
+      JSON.stringify(
+        {
+          owner: item.owner,
+          caption: item.caption,
+          keywords: item.keywords,
+          addedAt: item.addedAt,
+          source: item.url,
+          thumbnail: item.thumbnail,
+          torboxJobId: item.jobId,
+          torboxJobHash: item.jobHash,
+        },
+        null,
+        2
+      )
+    )
 
     item.localPath = filePath
   }

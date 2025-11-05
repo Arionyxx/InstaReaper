@@ -21,6 +21,7 @@ const QueueItemSchema = z.object({
   progress: z.number(),
   error: z.string().optional(),
   jobId: z.string().optional(),
+  jobHash: z.string().optional(),
   localPath: z.string().optional(),
   addedAt: z.string(),
   completedAt: z.string().optional(),
@@ -47,6 +48,69 @@ const ReelSchema = z.object({
   thumbnail: z.string(),
 })
 
+const TorboxErrorSchema = z.object({
+  code: z.string(),
+  message: z.string(),
+  status: z.number().optional(),
+  details: z.any().optional(),
+})
+
+const TorboxFileLinkSchema = z.object({
+  url: z.string(),
+  filename: z.string().optional(),
+  sizeBytes: z.number().nullable().optional(),
+  expiresAt: z.string().nullable().optional(),
+  raw: z.any().optional(),
+})
+
+const TorboxJobStatusSchema = z.object({
+  jobId: z.string(),
+  jobHash: z.string().nullable().optional(),
+  status: z.enum(['queued', 'pending', 'processing', 'downloading', 'completed', 'failed', 'cancelled']),
+  progress: z.number(),
+  bytesTotal: z.number().nullable().optional(),
+  bytesDownloaded: z.number().nullable().optional(),
+  message: z.string().optional(),
+  etaSeconds: z.number().nullable().optional(),
+  raw: z.any().optional(),
+})
+
+const TorboxCreateJobResultSchema = z.object({
+  jobId: z.string(),
+  jobHash: z.string().nullable().optional(),
+  name: z.string().optional(),
+  raw: z.any().optional(),
+})
+
+const TorboxTestConnectionResultSchema = z.object({
+  user: z.record(z.any()).optional(),
+  detail: z.any().optional(),
+})
+
+function createTorboxResultSchema<T extends z.ZodTypeAny>(schema: T) {
+  return z.union([
+    z.object({
+      ok: z.literal(true),
+      data: schema,
+    }),
+    z.object({
+      ok: z.literal(false),
+      error: TorboxErrorSchema,
+    }),
+  ])
+}
+
+const TorboxTestConnectionResponseSchema = createTorboxResultSchema(TorboxTestConnectionResultSchema)
+const TorboxCreateJobResponseSchema = createTorboxResultSchema(TorboxCreateJobResultSchema)
+const TorboxJobStatusResponseSchema = createTorboxResultSchema(TorboxJobStatusSchema)
+const TorboxFileLinksResponseSchema = createTorboxResultSchema(z.array(TorboxFileLinkSchema))
+const TorboxCancelResponseSchema = createTorboxResultSchema(z.object({ cancelled: z.boolean() }))
+const TorboxListResponseSchema = createTorboxResultSchema(z.array(TorboxJobStatusSchema))
+
+function invokeTorbox<T extends z.ZodTypeAny>(channel: string, schema: T, payload?: unknown) {
+  return ipcRenderer.invoke(channel, payload).then((result) => schema.parse(result))
+}
+
 // Expose protected methods that allow the renderer process to use
 // the ipcRenderer without exposing the entire object
 contextBridge.exposeInMainWorld('electronAPI', {
@@ -66,18 +130,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Torbox API
   torbox: {
-    testConnection: (apiKey: string): Promise<boolean> => 
-      ipcRenderer.invoke('torbox:testConnection', apiKey),
-    addUrl: (url: string): Promise<{ jobId: string }> => 
-      ipcRenderer.invoke('torbox:addUrl', url),
-    getStatus: (jobId: string): Promise<z.infer<typeof QueueItemSchema>> => 
-      ipcRenderer.invoke('torbox:getStatus', jobId),
-    getFileLinks: (jobId: string): Promise<Array<{ url: string; filename: string; size: number }>> => 
-      ipcRenderer.invoke('torbox:getFileLinks', jobId),
-    cancel: (jobId: string): Promise<boolean> => 
-      ipcRenderer.invoke('torbox:cancel', jobId),
-    list: (): Promise<Array<any>> => 
-      ipcRenderer.invoke('torbox:list'),
+    testConnection: () => invokeTorbox('torbox:testConnection', TorboxTestConnectionResponseSchema),
+    addUrl: (payload: { url: string; name?: string }) => invokeTorbox('torbox:addUrl', TorboxCreateJobResponseSchema, payload),
+    getStatus: (reference: { jobId: string; jobHash?: string | null }) =>
+      invokeTorbox('torbox:getStatus', TorboxJobStatusResponseSchema, reference),
+    getFileLinks: (reference: { jobId: string; jobHash?: string | null }) =>
+      invokeTorbox('torbox:getFileLinks', TorboxFileLinksResponseSchema, reference),
+    cancel: (reference: { jobId: string; jobHash?: string | null }) =>
+      invokeTorbox('torbox:cancel', TorboxCancelResponseSchema, reference),
+    list: () => invokeTorbox('torbox:list', TorboxListResponseSchema),
   },
 
   // Queue management
@@ -141,12 +202,12 @@ export type ElectronAPI = {
     selectFolder: () => Promise<string | null>
   }
   torbox: {
-    testConnection: (apiKey: string) => Promise<boolean>
-    addUrl: (url: string) => Promise<{ jobId: string }>
-    getStatus: (jobId: string) => Promise<any>
-    getFileLinks: (jobId: string) => Promise<Array<{ url: string; filename: string; size: number }>>
-    cancel: (jobId: string) => Promise<boolean>
-    list: () => Promise<Array<any>>
+    testConnection: () => Promise<z.infer<typeof TorboxTestConnectionResponseSchema>>
+    addUrl: (payload: { url: string; name?: string }) => Promise<z.infer<typeof TorboxCreateJobResponseSchema>>
+    getStatus: (reference: { jobId: string; jobHash?: string | null }) => Promise<z.infer<typeof TorboxJobStatusResponseSchema>>
+    getFileLinks: (reference: { jobId: string; jobHash?: string | null }) => Promise<z.infer<typeof TorboxFileLinksResponseSchema>>
+    cancel: (reference: { jobId: string; jobHash?: string | null }) => Promise<z.infer<typeof TorboxCancelResponseSchema>>
+    list: () => Promise<z.infer<typeof TorboxListResponseSchema>>
   }
   queue: {
     get: () => Promise<any[]>

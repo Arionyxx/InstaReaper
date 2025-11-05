@@ -9,6 +9,20 @@ interface ToastContextType {
 
 const ToastContext = createContext<ToastContextType | undefined>(undefined)
 
+const missingToastContext: ToastContextType = {
+  toasts: [],
+  addToast: (toast) => {
+    if (import.meta.env.DEV) {
+      console.warn('Attempted to add a toast without an active ToastProvider. The toast will be ignored.', toast)
+    }
+  },
+  removeToast: () => {
+    if (import.meta.env.DEV) {
+      console.warn('Attempted to remove a toast without an active ToastProvider. Ignoring call.')
+    }
+  },
+}
+
 export function ToastProvider({ children }: { children: React.ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([])
 
@@ -20,17 +34,17 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
       duration: toast.duration || 3000,
     }
 
-    setToasts(prev => [...prev, newToast])
+    setToasts((prev) => [...prev, newToast])
 
     if (newToast.duration && newToast.duration > 0) {
       setTimeout(() => {
-        setToasts(prev => prev.filter(t => t.id !== id))
+        setToasts((prev) => prev.filter((t) => t.id !== id))
       }, newToast.duration)
     }
   }, [])
 
   const removeToast = useCallback((id: string) => {
-    setToasts(prev => prev.filter(t => t.id !== id))
+    setToasts((prev) => prev.filter((t) => t.id !== id))
   }, [])
 
   return (
@@ -43,7 +57,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
 export function useToast() {
   const context = useContext(ToastContext)
   if (context === undefined) {
-    throw new Error('useToast must be used within a ToastProvider')
+    return missingToastContext
   }
   return context
 }

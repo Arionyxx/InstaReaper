@@ -5,6 +5,47 @@
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>InstaReaper</title>
+    <script type="module">
+      const origin = window.location.origin
+      const devConnectSources = ["'self'", 'https://api.torbox.app']
+      if (origin && origin.startsWith('http')) {
+        devConnectSources.push(origin, origin.replace(/^http/, 'ws'))
+      }
+
+      const devCsp = [
+        "default-src 'self'",
+        "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+        "style-src 'self' 'unsafe-inline'",
+        "img-src 'self' data: blob: https: file:",
+        `connect-src ${devConnectSources.join(' ')}`,
+        "font-src 'self' data:",
+        "frame-src https://www.instagram.com",
+        "media-src 'self' blob: data: file:",
+        "worker-src 'self' blob:"
+      ].join('; ')
+
+      const prodCsp = [
+        "default-src 'self'",
+        "script-src 'self'",
+        "style-src 'self'",
+        "img-src 'self' data: blob: https: file:",
+        "connect-src 'self' https://api.torbox.app",
+        "font-src 'self' data:",
+        "frame-src https://www.instagram.com",
+        "media-src 'self' blob: data: file:",
+        "worker-src 'self' blob:"
+      ].join('; ')
+
+      const existingMeta = document.head.querySelector('meta[http-equiv="Content-Security-Policy"]')
+      if (existingMeta) {
+        existingMeta.remove()
+      }
+
+      const meta = document.createElement('meta')
+      meta.httpEquiv = 'Content-Security-Policy'
+      meta.content = import.meta.env.DEV ? devCsp : prodCsp
+      document.head.prepend(meta)
+    </script>
   </head>
   <body>
     <div id="root"></div>
